@@ -1,30 +1,32 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Naruto Runner - Optimized</title>
+    <title>Naruto Runner - High Performance</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
-        body { margin: 0; overflow: hidden; background-color: #87ceeb; touch-action: none; font-family: 'Arial', sans-serif; }
-        /* Loader Styles */
-        #loading-screen {
-            position: fixed; inset: 0; background: #000; color: white;
-            display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 1000;
-        }
-        .loader-bar { width: 200px; height: 10px; background: #333; border-radius: 5px; margin-top: 20px; overflow: hidden; }
-        #progress { width: 0%; height: 100%; background: #ff4444; transition: width 0.3s; }
+        body { margin: 0; overflow: hidden; background-color: #000; touch-action: none; font-family: 'Arial', sans-serif; }
         
-        /* Game UI */
+        /* Loader Styles */
+        #loader-screen {
+            position: fixed; inset: 0; background: #111; display: flex; 
+            flex-direction: column; align-items: center; justify-content: center; z-index: 1000;
+        }
+        #load-bar-bg { width: 250px; height: 12px; background: #333; border-radius: 6px; margin-top: 20px; overflow: hidden; }
+        #load-bar-fill { width: 0%; height: 100%; background: linear-gradient(90deg, #ff4444, #ff8800); transition: width 0.2s; }
+
         #login-screen, #start-screen {
             position: fixed; inset: 0; background: rgba(0,0,0,0.8);
-            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            display: none; flex-direction: column; align-items: center; justify-content: center;
             z-index: 200; color: white; text-align: center;
         }
-        #start-screen { background: rgba(0,0,0,0.4); display: none; }
+        #top-nav { position: absolute; top: 10px; width: 100%; display: flex; justify-content: center; z-index: 210; }
+        .change-btn { background: rgba(255,255,255,0.2); border: 1px solid white; color: white; padding: 5px 15px; border-radius: 20px; font-size: 14px; cursor: pointer; }
         #ui { position: fixed; top: 20px; left: 20px; color: white; text-shadow: 2px 2px #000; z-index: 10; font-size: 28px; font-weight: bold; display: none; }
         #fever-ui { position: fixed; top: 70px; left: 20px; color: #ffff00; font-size: 24px; font-weight: bold; display: none; text-shadow: 2px 2px #000; z-index: 10; align-items: center; gap: 10px; }
-        #msg { position: fixed; top: 40%; left: 50%; transform: translate(-50%, -50%); color: #ff4444; font-size: 50px; font-weight: bold; display: none; text-shadow: 3px 3px #000; z-index: 100; }
-        input { padding: 12px; margin: 10px; border-radius: 5px; border: none; }
-        button { padding: 12px 25px; background: #ff4444; color: white; border: none; cursor: pointer; border-radius: 5px; font-weight: bold; }
+        #leaderboard { position: fixed; top: 20px; right: 20px; color: gold; text-shadow: 1px 1px #000; z-index: 10; font-size: 14px; text-align: right; pointer-events: none; }
+        input { padding: 12px; margin: 10px; border-radius: 5px; border: none; font-size: 16px; color: #000; width: 200px; }
+        button#login-btn { padding: 12px 25px; background: #ff4444; color: white; border: none; font-size: 18px; font-weight: bold; cursor: pointer; border-radius: 5px; }
+        #msg { position: fixed; top: 40%; left: 50%; transform: translate(-50%, -50%); color: #ff4444; font-size: 50px; font-weight: bold; display: none; text-shadow: 3px 3px #000; z-index: 100; text-align: center; }
     </style>
 
     <script type="importmap">
@@ -40,12 +42,12 @@
 </head>
 <body>
 
-    <div id="loading-screen">
-        <h1>LOADING JUTSU...</h1>
-        <div class="loader-bar"><div id="progress"></div></div>
+    <div id="loader-screen">
+        <h2 style="color: white; letter-spacing: 2px;">LOADING ASSETS</h2>
+        <div id="load-bar-bg"><div id="load-bar-fill"></div></div>
     </div>
 
-    <div id="login-screen" style="display:none;">
+    <div id="login-screen">
         <h1>NARUTO RUNNER</h1>
         <input type="text" id="username" placeholder="Username">
         <input type="password" id="pass" placeholder="Password">
@@ -53,170 +55,321 @@
     </div>
 
     <div id="start-screen">
-        <h2 style="font-size: 40px;">TAP TO START</h2>
+        <div id="top-nav">
+            <button class="change-btn" id="change-name-btn">Change User: <span id="current-user-display"></span></button>
+        </div>
+        <div id="score-stats" style="margin-bottom: 20px; font-size: 20px;">
+            BEST: <span id="best-score-ui">0</span> | PREV: <span id="prev-score-ui">0</span>
+        </div>
+        <h2 style="font-size: 40px; margin: 0;">TAP TO START</h2>
     </div>
 
     <div id="ui">SCORE: <span id="score">0</span></div>
-    <div id="fever-ui">GOLD RUSH</div>
+    <div id="fever-ui">GOLD RUSH <img src="https://cdn-icons-png.flaticon.com/512/217/217853.png" width="30"></div>
+    <div id="leaderboard">TOP 5 PLAYERS<br><div id="high-scores-list"></div></div>
     <div id="msg">WASTED</div>
 
     <script type="module">
         import * as THREE from 'three';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { initializeApp } from "firebase/app";
+        import { getFirestore, collection, query, orderBy, limit, getDocs, doc, setDoc, getDoc } from "firebase/firestore";
 
-        // --- GAME CONFIG ---
-        const CONFIG = { 
-            laneWidth: 4.8, startSpeed: 1.0, maxSpeed: 7.8, 
-            jumpForce: 0.52, gravity: 0.03, coinScale: 8.0,
-            WORLD_END_X: -850, startPosX: -135
+        const firebaseConfig = {
+            apiKey: "AIzaSyBUUd2oA6HMEpa7TqOwOiiUCKSugsLOrUY",
+            authDomain: "game-e2f9a.firebaseapp.com",
+            projectId: "game-e2f9a",
+            storageBucket: "game-e2f9a.firebasestorage.app",
+            messagingSenderId: "997350610258",
+            appId: "1:997350610258:web:495b64bd803b12e3b1968b"
         };
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
 
         let scene, camera, renderer, char, mixer, clock = new THREE.Clock();
-        let isReady = false, gameStarted = false, isGameOver = false, score = 0;
-        let coins = [], coinPool = [], collidableObjects = [];
-        let currentLane = 0, verticalVelocity = 0, isJumping = false;
-        let lastSpawnX = CONFIG.startPosX - 50;
+        let isReady = false, isGameOver = false, gameStarted = false, score = 0;
+        let listener, coinSound, bgMusic, userBest = 0, userPrev = 0, currentUsername = "";
+        let coins = [], coinTemplate = null, collidableObjects = [];
+        let lastSpawnX = -150, scoreTimer = 0;
 
-        // --- LOADING SYSTEM ---
-        const manager = new THREE.LoadingManager();
-        const loader = new GLTFLoader(manager);
+        let isFeverMode = false, feverEndTime = 0, isFadingFever = false;
+        const feverMilestones = [500, 10000, 25000, 50000];
+        let triggeredMilestones = [];
 
-        manager.onProgress = (url, loaded, total) => {
-            document.getElementById('progress').style.width = (loaded / total * 100) + '%';
+        const CONFIG = { 
+            laneWidth: 4.8, startSpeed: 1.0, maxSpeed: 7.8, speedFactor: 0.00006, 
+            laneSnapSpeed: 0.8, startPosX: -135, groundY: 0.2, jumpForce: 0.52, 
+            gravity: 0.03, rollGravity: 0.18, rollDuration: 900, coinValue: 50, 
+            coinScale: 8.0, WORLD_END_X: -850,
+            FAR_PLANE: 500 // Optimization: Reduce render distance
         };
+        
+        const railPoints = [{ x: -131, z: -53.0 }, { x: -406, z: -53.4 }, { x: -506, z: -54.1 }, { x: -661, z: -55.4 }, { x: -861, z: -57.5 }];
+        let currentSpeed = CONFIG.startSpeed, currentLane = 0, verticalVelocity = 0, isJumping = false, isRolling = false, rollStartTime = 0;
+        const downRay = new THREE.Raycaster(), frontRay = new THREE.Raycaster();
 
+        // --- ASSET LOADING MANAGER ---
+        const manager = new THREE.LoadingManager();
+        manager.onProgress = (url, loaded, total) => {
+            document.getElementById('load-bar-fill').style.width = (loaded / total * 100) + '%';
+        };
         manager.onLoad = () => {
-            document.getElementById('loading-screen').style.display = 'none';
-            document.getElementById('login-screen').style.display = 'flex';
+            document.getElementById('loader-screen').style.display = 'none';
             isReady = true;
+            checkPersistence();
+            animate();
         };
 
         function init() {
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x87ceeb);
+            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, CONFIG.FAR_PLANE);
             
-            // LAG FIX 1: Fog hides far objects so GPU doesn't work too hard
-            scene.fog = new THREE.Fog(0x87ceeb, 50, 350);
-
-            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
             renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Limit pixel ratio for performance
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.outputColorSpace = THREE.SRGBColorSpace;
             document.body.appendChild(renderer.domElement);
 
-            scene.add(new THREE.AmbientLight(0xffffff, 3));
+            listener = new THREE.AudioListener(); camera.add(listener);
+            coinSound = new THREE.Audio(listener); bgMusic = new THREE.Audio(listener);
             
-            // ONE-TIME ASSET LOADING
+            const audioLoader = new THREE.AudioLoader(manager);
+            audioLoader.load('subway-surfers-coin-collect.mp3', (b) => { coinSound.setBuffer(b); coinSound.setVolume(0.4); });
+            audioLoader.load('Subway-Surfers-Theme-Sound-Effect.mp3', (b) => { bgMusic.setBuffer(b); bgMusic.setLoop(true); bgMusic.setVolume(0.5); });
+
+            scene.add(new THREE.AmbientLight(0xffffff, 3.5));
+            const sun = new THREE.DirectionalLight(0xffffff, 1.5); sun.position.set(10, 50, 10); scene.add(sun);
+
+            const loader = new GLTFLoader(manager);
             loader.load('subway_surfers_maps.glb', (gltf) => {
-                scene.add(gltf.scene);
-                gltf.scene.traverse(c => { if(c.isMesh) collidableObjects.push(c); });
+                scene.add(gltf.scene); 
+                gltf.scene.traverse(c => { 
+                    if(c.isMesh) {
+                        collidableObjects.push(c);
+                        c.matrixAutoUpdate = false; // GPU Optimization
+                        c.updateMatrix();
+                    }
+                });
             });
 
-            loader.load('naruto_uzumaki_running_animation.glb', (gltf) => {
-                char = gltf.scene;
-                char.scale.set(1.5, 1.5, 1.5);
-                char.position.set(CONFIG.startPosX, 0.2, -53);
-                scene.add(char);
-                mixer = new THREE.AnimationMixer(char);
-                mixer.clipAction(gltf.animations[0]).play();
+            loader.load('naruto_uzumaki_running_animation.glb', (gChar) => {
+                char = gChar.scene; char.scale.set(1.5, 1.5, 1.5);
+                char.position.set(CONFIG.startPosX, CONFIG.groundY, -53); char.rotation.set(0, -Math.PI / 2, 0);
+                scene.add(char); mixer = new THREE.AnimationMixer(char);
+                mixer.clipAction(gChar.animations[0]).play();
             });
 
-            loader.load('subway_surfers_coin.glb', (gltf) => {
-                // Pre-create 50 coins and hide them (Object Pooling)
-                for(let i=0; i<50; i++) {
-                    let c = gltf.scene.clone();
-                    c.scale.set(CONFIG.coinScale, CONFIG.coinScale, CONFIG.coinScale);
-                    c.visible = false;
-                    scene.add(c);
-                    coinPool.push(c);
-                }
-            });
+            loader.load('subway_surfers_coin.glb', (gCoin) => { coinTemplate = gCoin.scene; });
 
-            animate();
+            document.getElementById('login-btn').onclick = login;
+            document.getElementById('change-name-btn').onclick = () => { localStorage.removeItem('naruto_user'); location.reload(); };
+            window.addEventListener('touchstart', onTouch);
         }
 
-        // LAG FIX 2: Object Pooling (Reuse coins instead of creating them)
-        function spawnCoin(x, y, lane) {
-            let coin = coinPool.find(c => !c.visible);
-            if (!coin) return;
+        // --- CORE LOGIC FUNCTIONS ---
+        async function checkPersistence() {
+            const saved = localStorage.getItem('naruto_user');
+            if (saved) {
+                currentUsername = saved;
+                const userSnap = await getDoc(doc(db, "players", currentUsername));
+                if (userSnap.exists()) {
+                    userBest = userSnap.data().bestScore || 0;
+                    userPrev = userSnap.data().prevScore || 0;
+                    enterGameUI();
+                }
+            } else {
+                document.getElementById('login-screen').style.display = 'flex';
+            }
+        }
 
-            const z = -53 + (lane * CONFIG.laneWidth);
-            coin.position.set(x, y, z);
-            coin.visible = true;
-            coin.userData.isCollected = false;
-            coins.push(coin);
+        function enterGameUI() {
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('start-screen').style.display = 'flex';
+            document.getElementById('current-user-display').innerText = currentUsername;
+            updateStatsUI();
+            fetchLeaderboard();
+        }
+
+        async function login() {
+            const user = document.getElementById('username').value.trim();
+            const pass = document.getElementById('pass').value;
+            if (!user) return alert("Enter username");
+            const userRef = doc(db, "players", user);
+            const userSnap = await getDoc(userRef);
+            if (userSnap.exists()) {
+                if (userSnap.data().password && userSnap.data().password !== pass) return alert("Wrong password");
+                userBest = userSnap.data().bestScore || 0;
+                userPrev = userSnap.data().prevScore || 0;
+            } else {
+                await setDoc(userRef, { username: user, password: pass, bestScore: 0, prevScore: 0 });
+            }
+            currentUsername = user;
+            localStorage.setItem('naruto_user', user);
+            enterGameUI();
+        }
+
+        function getTrackZ(x) {
+            for (let i = 0; i < railPoints.length - 1; i++) {
+                let p1 = railPoints[i], p2 = railPoints[i+1];
+                if (x <= p1.x && x >= p2.x) {
+                    let r = (x - p1.x) / (p2.x - p1.x);
+                    return p1.z + r * (p2.z - p1.z);
+                }
+            }
+            return railPoints[railPoints.length-1].z;
         }
 
         function spawnPattern() {
+            if(!coinTemplate || !char || isFeverMode) return;
+            const p = Math.floor(Math.random() * 5);
             const lane = Math.floor(Math.random() * 3) - 1;
-            for(let i=0; i<5; i++) {
-                spawnCoin(lastSpawnX - (i * 15), 3, lane);
+            switch(p) {
+                case 0: for(let i=0; i<8; i++) createCoin(lastSpawnX-(i*15), 2+(i%2)*4, (i%3)-1); lastSpawnX-=180; break;
+                case 1: for(let i=0; i<6; i++) { createCoin(lastSpawnX-(i*15), 3, 1); createCoin(lastSpawnX-(i*15), 3, -1); } lastSpawnX-=130; break;
+                default: for(let i=0; i<5; i++) createCoin(lastSpawnX-(i*14), 2.8, lane); lastSpawnX-=110;
             }
-            lastSpawnX -= 150;
+        }
+
+        function createCoin(x, y, lane, isFever = false) {
+            const coin = coinTemplate.clone();
+            coin.scale.set(CONFIG.coinScale, CONFIG.coinScale, CONFIG.coinScale);
+            const z = getTrackZ(x) + (lane * CONFIG.laneWidth);
+            coin.position.set(x, y, z);
+            coin.userData = { isCollected: false, relLane: lane, spawnX: x, isFeverCoin: isFever, blinkTimer: 0 };
+            scene.add(coin); coins.push(coin);
+        }
+
+        function triggerFeverSpawn() {
+            const feverDist = currentSpeed * 220;
+            for(let x = char.position.x - 25; x > char.position.x - feverDist; x -= 10) {
+                for (let l = -1; l <= 1; l++) createCoin(x, 3.5, l, true);
+            }
+            lastSpawnX = char.position.x - feverDist - 30;
+        }
+
+        let sX, sY, moved = false;
+        function onTouch(e) {
+            if (!gameStarted && isReady && currentUsername) {
+                gameStarted = true;
+                document.getElementById('start-screen').style.display = 'none';
+                document.getElementById('ui').style.display = 'block';
+                if (!bgMusic.isPlaying) bgMusic.play(); return;
+            }
+            if (isGameOver) return;
+            sX = e.touches[0].clientX; sY = e.touches[0].clientY; moved = false;
+            window.ontouchmove = (em) => {
+                if (isGameOver || moved) return;
+                let dx = sX - em.touches[0].clientX, dy = sY - em.touches[0].clientY;
+                if (Math.abs(dx) > 25 || Math.abs(dy) > 25) {
+                    moved = true;
+                    if (Math.abs(dx) > Math.abs(dy)) {
+                        if (dx > 25 && currentLane < 1) currentLane++;
+                        if (dx < -25 && currentLane > -1) currentLane--;
+                    } else {
+                        if (dy > 25 && !isJumping) { verticalVelocity = CONFIG.jumpForce; isJumping = true; }
+                        if (dy < -25) { isRolling = true; rollStartTime = Date.now(); char.scale.y = 0.6; if (isJumping) verticalVelocity = -0.9; }
+                    }
+                }
+            };
         }
 
         function animate() {
             requestAnimationFrame(animate);
-            if (!isReady || !gameStarted || isGameOver) {
-                if(isReady) renderer.render(scene, camera);
-                return;
-            }
-
-            const delta = clock.getDelta();
-            score += delta * 50;
-            document.getElementById('score').innerText = Math.floor(score);
-
-            // Movement Logic
-            char.position.x -= CONFIG.startSpeed;
-            if (lastSpawnX > char.position.x - 400) spawnPattern();
-
-            // LAG FIX 3: Distance Culling (Disable coins far away)
-            for (let i = coins.length - 1; i >= 0; i--) {
-                let c = coins[i];
-                let dist = Math.abs(c.position.x - char.position.x);
-
-                if (dist > 300) {
-                    c.visible = false; // Tell GPU to ignore
-                    coins.splice(i, 1);
-                    continue;
+            if (!isReady || !gameStarted || isGameOver) { renderer.render(scene, camera); return; }
+            const delta = clock.getDelta(); const now = Date.now();
+            
+            // Fever & Milestones
+            feverMilestones.forEach(m => {
+                if (score >= m && !triggeredMilestones.includes(m)) {
+                    triggeredMilestones.push(m); isFeverMode = true;
+                    feverEndTime = now + 4000;
+                    document.getElementById('fever-ui').style.display = 'flex';
+                    triggerFeverSpawn();
                 }
+            });
+            if (isFeverMode && now >= feverEndTime) { isFeverMode = false; isFadingFever = true; document.getElementById('fever-ui').style.display = 'none'; }
 
-                if (!c.userData.isCollected) {
-                    c.rotation.y += 0.1;
-                    if (char.position.distanceTo(c.position) < 4) {
-                        c.userData.isCollected = true;
-                        c.visible = false;
-                    }
-                }
-            }
-
-            // World Reset (Looping)
+            // Movement & World Loop
+            if (lastSpawnX > char.position.x - 450) spawnPattern();
             if (char.position.x < CONFIG.WORLD_END_X) {
-                char.position.x = CONFIG.startPosX;
-                lastSpawnX = CONFIG.startPosX - 50;
+                const shift = CONFIG.startPosX - char.position.x;
+                char.position.x = CONFIG.startPosX; lastSpawnX = CONFIG.startPosX - 50;
+                coins.forEach(c => c.position.x += shift);
             }
 
-            // Camera follow
-            camera.position.set(char.position.x + 20, char.position.y + 10, char.position.z);
-            camera.lookAt(char.position.x - 10, char.position.y, char.position.z);
+            // Physics & Lane
+            currentSpeed = Math.min(CONFIG.startSpeed + (score * CONFIG.speedFactor), CONFIG.maxSpeed);
+            score += delta * 15;
+            char.position.x -= currentSpeed;
+            document.getElementById('score').innerText = Math.floor(score);
+            
+            const targetZ = getTrackZ(char.position.x) + (currentLane * CONFIG.laneWidth);
+            char.position.z = THREE.MathUtils.lerp(char.position.z, targetZ, CONFIG.laneSnapSpeed);
+            
+            // Gravity & Ground
+            downRay.set(new THREE.Vector3(char.position.x, char.position.y + 2, char.position.z), new THREE.Vector3(0, -1, 0));
+            const downHits = downRay.intersectObjects(collidableObjects, true);
+            let floorY = (downHits.length > 0 && downHits[0].point.y > 0.5) ? downHits[0].point.y : CONFIG.groundY;
+            
+            char.position.y += verticalVelocity;
+            if (char.position.y > floorY) verticalVelocity -= (isRolling ? CONFIG.rollGravity : CONFIG.gravity);
+            else { char.position.y = floorY; verticalVelocity = 0; isJumping = false; }
+            if (isRolling && now - rollStartTime > CONFIG.rollDuration) { isRolling = false; char.scale.y = 1.5; }
 
-            if (mixer) mixer.update(delta * 2);
+            // Coin Processing & Culling
+            for (let i = coins.length - 1; i >= 0; i--) {
+                const c = coins[i];
+                if (!c.userData.isCollected) {
+                    c.rotation.y += 0.05;
+                    // Optimization: Hide distant coins
+                    c.visible = Math.abs(c.position.x - char.position.x) < 300;
+
+                    if (char.position.distanceTo(c.position) < 5) {
+                        c.userData.isCollected = true; score += CONFIG.coinValue;
+                        if (coinSound.isPlaying) coinSound.stop(); coinSound.play();
+                    }
+                    if (c.position.x > char.position.x + 100) { scene.remove(c); coins.splice(i, 1); }
+                } else {
+                    c.scale.multiplyScalar(1.2); c.position.y += 0.5;
+                    if (c.scale.x > 30) { scene.remove(c); coins.splice(i, 1); }
+                }
+            }
+            
+            // Collision & Camera
+            frontRay.set(new THREE.Vector3(char.position.x, char.position.y + 1, char.position.z), new THREE.Vector3(-1, 0, 0));
+            if (frontRay.intersectObjects(collidableObjects, true).length > 0 && frontRay.intersectObjects(collidableObjects, true)[0].distance < 1.0) gameOver();
+
+            camera.position.set(char.position.x + 22, char.position.y + 8, THREE.MathUtils.lerp(camera.position.z, char.position.z, 0.1));
+            camera.lookAt(char.position.x - 30, char.position.y + 2, char.position.z);
+            if (mixer) mixer.update(delta * (currentSpeed * 1.5));
             renderer.render(scene, camera);
         }
 
-        // UI Listeners
-        document.getElementById('login-btn').onclick = () => {
-            document.getElementById('login-screen').style.display = 'none';
-            document.getElementById('start-screen').style.display = 'flex';
-        };
+        async function gameOver() { 
+            isGameOver = true; document.getElementById('msg').style.display = 'block';
+            await saveScore(); setTimeout(() => location.reload(), 2000);
+        }
 
-        window.addEventListener('touchstart', () => {
-            if (!gameStarted && isReady) {
-                gameStarted = true;
-                document.getElementById('start-screen').style.display = 'none';
-                document.getElementById('ui').style.display = 'block';
-            }
-        });
+        async function saveScore() {
+            if(!currentUsername) return;
+            const finalScore = Math.floor(score);
+            const userRef = doc(db, "players", currentUsername);
+            const newBest = finalScore > userBest ? finalScore : userBest;
+            await setDoc(userRef, { bestScore: newBest, prevScore: finalScore }, { merge: true });
+        }
+
+        async function fetchLeaderboard() {
+            const q = query(collection(db, "players"), orderBy("bestScore", "desc"), limit(5));
+            const snap = await getDocs(q);
+            let h = ""; snap.forEach(d => h += `<div>${d.id}: ${d.data().bestScore}</div>`);
+            document.getElementById('high-scores-list').innerHTML = h;
+        }
+
+        function updateStatsUI() {
+            document.getElementById('best-score-ui').innerText = userBest;
+            document.getElementById('prev-score-ui').innerText = userPrev;
+        }
 
         init();
     </script>
