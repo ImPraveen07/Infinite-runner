@@ -1,8 +1,7 @@
-
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Naruto Runner - Bug Fix & Patterns</title>
+    <title>Naruto Runner - Optimized</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
         body { margin: 0; overflow: hidden; background-color: #87ceeb; touch-action: none; font-family: 'Arial', sans-serif; }
@@ -64,6 +63,7 @@
         import { initializeApp } from "firebase/app";
         import { getFirestore, collection, query, orderBy, limit, getDocs, doc, setDoc, getDoc } from "firebase/firestore";
 
+        // Firebase Configuration
         const firebaseConfig = {
             apiKey: "AIzaSyBUUd2oA6HMEpa7TqOwOiiUCKSugsLOrUY",
             authDomain: "game-e2f9a.firebaseapp.com",
@@ -75,20 +75,21 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
 
+        // Core Variables
         let scene, camera, renderer, char, mixer, clock = new THREE.Clock();
         let isReady = false, isGameOver = false, gameStarted = false, score = 0;
         let listener, coinSound, bgMusic, userBest = 0, userPrev = 0, currentUsername = "";
         let coins = [], coinTemplate = null, collidableObjects = [];
         let lastSpawnX = -150, scoreTimer = 0;
 
-        let isFeverMode = false, feverEndTime = 0, isFadingFever = false;
+        let isFeverMode = false, feverEndTime = 0;
         const feverMilestones = [500, 10000, 25000, 50000];
         let triggeredMilestones = [];
 
         const CONFIG = { 
             laneWidth: 4.8, startSpeed: 1.0, maxSpeed: 7.8, speedFactor: 0.00006, 
-            laneSnapSpeed: 0.8, startPosX: -135, groundY: 0.2, jumpForce: 0.52, 
-            gravity: 0.03, rollGravity: 0.18, rollDuration: 900, coinValue: 50, 
+            laneSnapSpeed: 0.15, startPosX: -135, groundY: 0.2, jumpForce: 0.52, 
+            gravity: 0.03, rollDuration: 900, coinValue: 50, 
             coinScale: 8.0, WORLD_END_X: -850 
         };
         
@@ -96,7 +97,7 @@
         let currentSpeed = CONFIG.startSpeed, currentLane = 0, verticalVelocity = 0, isJumping = false, isRolling = false, rollStartTime = 0;
         const downRay = new THREE.Raycaster(), frontRay = new THREE.Raycaster();
 
-        // --- FIXED LOGIN LOGIC ---
+        // --- AUTH LOGIC ---
         async function checkPersistence() {
             const saved = localStorage.getItem('naruto_user');
             if (saved) {
@@ -122,24 +123,16 @@
             const user = document.getElementById('username').value.trim();
             const pass = document.getElementById('pass').value;
             if (!user) return alert("Enter username");
-            
             const userRef = doc(db, "players", user);
             const userSnap = await getDoc(userRef);
-            
             if (userSnap.exists()) {
                 const data = userSnap.data();
-                // Check if user has a password and if it matches
-                if (data.password && data.password !== pass) {
-                    alert("This username is already taken. Please use the correct password or try a different name.");
-                    return; // CRITICAL: Stop the function here
-                }
+                if (data.password && data.password !== pass) { alert("Wrong password!"); return; }
                 userBest = data.bestScore || 0;
                 userPrev = data.prevScore || 0;
             } else {
                 await setDoc(userRef, { username: user, password: pass, bestScore: 0, prevScore: 0 });
             }
-            
-            // Only proceed if the return above wasn't hit
             currentUsername = user;
             localStorage.setItem('naruto_user', user);
             enterGameUI();
@@ -183,90 +176,95 @@
         function init() {
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x87ceeb);
-            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 5000);
+            
+            // PERFORMANCE: Reduce render distance from 5000 to 350
+            camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 350);
+            
             listener = new THREE.AudioListener(); camera.add(listener);
             coinSound = new THREE.Audio(listener); bgMusic = new THREE.Audio(listener);
             const audioLoader = new THREE.AudioLoader();
             audioLoader.load('subway-surfers-coin-collect.mp3', (b) => { coinSound.setBuffer(b); coinSound.setVolume(0.4); });
             audioLoader.load('Subway-Surfers-Theme-Sound-Effect.mp3', (b) => { bgMusic.setBuffer(b); bgMusic.setLoop(true); bgMusic.setVolume(0.5); });
 
-            renderer = new THREE.WebGLRenderer({ antialias: true });
+            // PERFORMANCE: Optimized Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
             renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
             renderer.outputColorSpace = THREE.SRGBColorSpace;
             document.body.appendChild(renderer.domElement);
 
-            scene.add(new THREE.AmbientLight(0xffffff, 3.5));
-            const sun = new THREE.DirectionalLight(0xffffff, 1.5); sun.position.set(10, 50, 10); scene.add(sun);
+            scene.add(new THREE.AmbientLight(0xffffff, 2.2));
+            const sun = new THREE.DirectionalLight(0xffffff, 0.8); sun.position.set(10, 50, 10); scene.add(sun);
 
             const loader = new GLTFLoader();
+            
+            // NESTED LOADING WITH ERROR PROTECTION
             loader.load('subway_surfers_maps.glb', (gltf) => {
-                scene.add(gltf.scene); gltf.scene.traverse(c => { if(c.isMesh) collidableObjects.push(c); });
+                scene.add(gltf.scene); 
+                gltf.scene.traverse(c => { if(c.isMesh) { c.matrixAutoUpdate = false; c.updateMatrix(); collidableObjects.push(c); }});
+                
                 loader.load('naruto_uzumaki_running_animation.glb', (gChar) => {
                     char = gChar.scene; char.scale.set(1.5, 1.5, 1.5);
                     char.position.set(CONFIG.startPosX, CONFIG.groundY, -53); char.rotation.set(0, -Math.PI / 2, 0);
                     scene.add(char); mixer = new THREE.AnimationMixer(char);
                     mixer.clipAction(gChar.animations[0]).play();
+
                     loader.load('subway_surfers_coin.glb', (gCoin) => {
-                        coinTemplate = gCoin.scene; isReady = true; checkPersistence(); animate();
-                    });
-                });
-            });
+                        coinTemplate = gCoin.scene; finishLoading();
+                    }, undefined, () => { createSafeCoin(); finishLoading(); });
+
+                }, undefined, () => { console.error("Naruto missing!"); finishLoading(); });
+
+            }, undefined, () => { alert("Fatal Error: Map file missing."); });
 
             document.getElementById('login-btn').onclick = login;
             document.getElementById('change-name-btn').onclick = () => { localStorage.removeItem('naruto_user'); location.reload(); };
             window.addEventListener('touchstart', onTouch);
         }
 
-        function createCoin(x, y, lane, isFever = false) {
+        function createSafeCoin() {
+            const geo = new THREE.CylinderGeometry(0.5, 0.5, 0.1, 8);
+            const mat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+            coinTemplate = new THREE.Mesh(geo, mat);
+            coinTemplate.rotation.x = Math.PI / 2;
+        }
+
+        function finishLoading() {
+            isReady = true; checkPersistence(); animate();
+        }
+
+        function createCoin(x, y, lane) {
+            if(!coinTemplate) return;
             const coin = coinTemplate.clone();
             coin.scale.set(CONFIG.coinScale, CONFIG.coinScale, CONFIG.coinScale);
             const z = getTrackZ(x) + (lane * CONFIG.laneWidth);
             coin.position.set(x, y, z);
-            coin.userData = { isCollected: false, relLane: lane, spawnX: x, isFeverCoin: isFever, blinkTimer: 0 };
+            coin.userData = { isCollected: false };
             scene.add(coin); coins.push(coin);
         }
 
-        // --- 20+ Pattern Logic ---
         function spawnPattern() {
-            if(!coinTemplate || !char || isFeverMode) return;
-            const p = Math.floor(Math.random() * 22);
+            if(!char) return;
             const lane = Math.floor(Math.random() * 3) - 1;
-
-            switch(p) {
-                case 0: // Zig-Zag High
-                    for(let i=0; i<8; i++) createCoin(lastSpawnX - (i*15), 2 + (i%2)*4, (i%3)-1);
-                    lastSpawnX -= 180; break;
-                case 1: // Wavey Double
-                    for(let i=0; i<6; i++) { createCoin(lastSpawnX-(i*15), 3, 1); createCoin(lastSpawnX-(i*15), 3, -1); }
-                    lastSpawnX -= 130; break;
-                case 2: // The Arch
-                    for(let i=0; i<7; i++) createCoin(lastSpawnX-(i*10), 2 + Math.sin((i/6)*Math.PI)*6, 0);
-                    lastSpawnX -= 120; break;
-                case 3: // Triple Gate
-                    for(let l=-1; l<=1; l++) createCoin(lastSpawnX, 3, l);
-                    lastSpawnX -= 60; break;
-                default: // Random Spaced Rows
-                    let count = Math.floor(Math.random()*4)+3;
-                    for(let i=0; i<count; i++) createCoin(lastSpawnX - (i*14), 2.8, lane);
-                    lastSpawnX -= 110;
-            }
+            createCoin(lastSpawnX, 3, lane);
+            lastSpawnX -= 60;
         }
 
         function triggerFeverSpawn() {
-            const feverDist = currentSpeed * 220;
-            for(let x = char.position.x - 25; x > char.position.x - feverDist; x -= 10) {
-                for (let l = -1; l <= 1; l++) createCoin(x, 3.5, l, true);
+            const feverDist = currentSpeed * 200;
+            for(let x = char.position.x - 30; x > char.position.x - feverDist; x -= 15) {
+                for (let l = -1; l <= 1; l++) createCoin(x, 3.5, l);
             }
-            lastSpawnX = char.position.x - feverDist - 30;
+            lastSpawnX = char.position.x - feverDist - 40;
         }
 
         function resetGame() {
             isGameOver = false; gameStarted = false; score = 0; scoreTimer = 0;
             currentSpeed = CONFIG.startSpeed; currentLane = 0;
-            triggeredMilestones = []; isFeverMode = false; isFadingFever = false;
+            triggeredMilestones = []; isFeverMode = false;
             document.getElementById('fever-ui').style.display = 'none';
-            char.position.set(CONFIG.startPosX, CONFIG.groundY, -53);
-            coins.forEach(c => scene.remove(c)); coins = []; lastSpawnX = char.position.x - 50;
+            if(char) char.position.set(CONFIG.startPosX, CONFIG.groundY, -53);
+            coins.forEach(c => scene.remove(c)); coins = []; lastSpawnX = CONFIG.startPosX - 50;
             document.getElementById('msg').style.display = 'none';
             document.getElementById('start-screen').style.display = 'flex';
             document.getElementById('ui').style.display = 'none';
@@ -287,14 +285,14 @@
             window.ontouchmove = (em) => {
                 if (isGameOver || moved) return;
                 let dx = sX - em.touches[0].clientX, dy = sY - em.touches[0].clientY;
-                if (Math.abs(dx) > 25 || Math.abs(dy) > 25) {
+                if (Math.abs(dx) > 20 || Math.abs(dy) > 20) {
                     moved = true;
                     if (Math.abs(dx) > Math.abs(dy)) {
-                        if (dx > 25 && currentLane < 1) currentLane++;
-                        if (dx < -25 && currentLane > -1) currentLane--;
+                        if (dx > 20 && currentLane < 1) currentLane++;
+                        if (dx < -20 && currentLane > -1) currentLane--;
                     } else {
-                        if (dy > 25 && !isJumping) { verticalVelocity = CONFIG.jumpForce; isJumping = true; isRolling = false; char.scale.y = 1.5; }
-                        if (dy < -25) { isRolling = true; rollStartTime = Date.now(); char.scale.y = 0.6; if (isJumping) verticalVelocity = -0.9; }
+                        if (dy > 20 && !isJumping) { verticalVelocity = CONFIG.jumpForce; isJumping = true; }
+                        if (dy < -20) { isRolling = true; rollStartTime = Date.now(); if(char) char.scale.y = 0.6; if (isJumping) verticalVelocity = -0.9; }
                     }
                 }
             };
@@ -303,11 +301,12 @@
         function animate() {
             requestAnimationFrame(animate);
             if (!isReady || !gameStarted || isGameOver) { renderer.render(scene, camera); return; }
-            const delta = clock.getDelta(); const now = Date.now();
+            const delta = Math.min(clock.getDelta(), 0.1); 
+            const now = Date.now();
             
             feverMilestones.forEach(m => {
                 if (score >= m && !triggeredMilestones.includes(m)) {
-                    triggeredMilestones.push(m); isFeverMode = true; isFadingFever = false;
+                    triggeredMilestones.push(m); isFeverMode = true; 
                     feverEndTime = now + 3000;
                     document.getElementById('fever-ui').style.display = 'flex';
                     triggerFeverSpawn();
@@ -315,12 +314,12 @@
             });
 
             if (isFeverMode && now >= feverEndTime) { 
-                isFeverMode = false; isFadingFever = true;
-                document.getElementById('fever-ui').style.display = 'none';
+                isFeverMode = false; document.getElementById('fever-ui').style.display = 'none';
             }
 
-            if (lastSpawnX > char.position.x - 450) spawnPattern();
+            if (lastSpawnX > char.position.x - 200) spawnPattern();
 
+            // World Loop
             if (char.position.x < CONFIG.WORLD_END_X) {
                 const shift = CONFIG.startPosX - char.position.x;
                 char.position.x = CONFIG.startPosX; lastSpawnX = CONFIG.startPosX - 50;
@@ -336,53 +335,41 @@
             document.getElementById('score').innerText = Math.floor(score);
             
             const targetZ = getTrackZ(char.position.x) + (currentLane * CONFIG.laneWidth);
-            char.position.z = THREE.MathUtils.lerp(char.position.z, targetZ, CONFIG.laneSnapSpeed);
+            char.position.z = THREE.MathUtils.lerp(char.position.z, targetZ, 0.15);
             
+            // Optimized Raycasting
             downRay.set(new THREE.Vector3(char.position.x, char.position.y + 2, char.position.z), new THREE.Vector3(0, -1, 0));
             const downHits = downRay.intersectObjects(collidableObjects, true);
             let floorY = CONFIG.groundY;
-            if (downHits.length > 0 && downHits[0].point.y > 0.5) floorY = downHits[0].point.y;
+            if (downHits.length > 0) floorY = downHits[0].point.y;
+            
             char.position.y += verticalVelocity;
-            if (char.position.y > floorY) verticalVelocity -= (isRolling ? CONFIG.rollGravity : CONFIG.gravity);
+            if (char.position.y > floorY) verticalVelocity -= CONFIG.gravity;
             else { char.position.y = floorY; verticalVelocity = 0; isJumping = false; }
 
-            // --- Coin Update & Fade Effects ---
+            // Coin Logic
             for (let i = coins.length - 1; i >= 0; i--) {
                 const c = coins[i];
                 if (!c.userData.isCollected) {
-                    c.rotation.y += 0.1;
-
-                    if (isFadingFever && c.userData.isFeverCoin) {
-                        c.userData.blinkTimer += delta * 18;
-                        c.visible = Math.floor(c.userData.blinkTimer) % 2 === 0;
-                        c.scale.multiplyScalar(0.9);
-                        if (c.scale.x < 0.3) { scene.remove(c); coins.splice(i, 1); continue; }
-                    }
-
-                    if (score > 10000 && !c.userData.isFeverCoin && !isFeverMode) {
-                        const shiftAmt = score > 25000 ? 3.2 : 2.0;
-                        const offset = Math.sin(now * 0.002 + c.userData.spawnX) * shiftAmt;
-                        const baseZ = getTrackZ(c.position.x) + (c.userData.relLane * CONFIG.laneWidth);
-                        c.position.z = baseZ + offset;
-                    }
-
                     if (char.position.distanceTo(c.position) < 4.5) {
                         c.userData.isCollected = true; score += CONFIG.coinValue;
                         if (coinSound.isPlaying) coinSound.stop(); coinSound.play();
+                        scene.remove(c); coins.splice(i, 1);
+                    } else if (c.position.x > char.position.x + 50) {
+                        scene.remove(c); coins.splice(i, 1);
                     }
-                    if (c.position.x > char.position.x + 100) { scene.remove(c); coins.splice(i, 1); }
-                } else {
-                    c.scale.multiplyScalar(1.2); c.position.y += 0.5;
-                    if (c.scale.x > 25) { scene.remove(c); coins.splice(i, 1); }
                 }
             }
             
-            frontRay.set(new THREE.Vector3(char.position.x, char.position.y + (isRolling?0.5:1.2), char.position.z), new THREE.Vector3(-1, 0, 0));
+            // Collision Logic
+            frontRay.set(new THREE.Vector3(char.position.x, char.position.y + 1, char.position.z), new THREE.Vector3(-1, 0, 0));
             const frontHits = frontRay.intersectObjects(collidableObjects, true);
-            if (frontHits.length > 0 && frontHits[0].distance < 1.0) gameOver();
+            if (frontHits.length > 0 && frontHits[0].distance < 1.2) gameOver();
 
-            camera.position.set(char.position.x + 22, char.position.y + 8, THREE.MathUtils.lerp(camera.position.z, char.position.z, 0.2));
+            // Camera Update
+            camera.position.set(char.position.x + 22, char.position.y + 8, THREE.MathUtils.lerp(camera.position.z, char.position.z, 0.1));
             camera.lookAt(char.position.x - 30, char.position.y + 2, char.position.z);
+            
             if (mixer) mixer.update(delta * (currentSpeed * 1.5));
             renderer.render(scene, camera);
         }
@@ -390,7 +377,6 @@
         async function gameOver() { 
             isGameOver = true; 
             document.getElementById('msg').style.display = 'block'; 
-            document.getElementById('fever-ui').style.display = 'none';
             if (bgMusic.isPlaying) bgMusic.stop(); 
             await saveScore(); 
             setTimeout(resetGame, 2000);
@@ -398,3 +384,4 @@
     </script>
 </body>
 </html>
+
